@@ -1,0 +1,332 @@
+// Pin assignments
+const int CLK_OUT_PIN = 2;   // Clock output
+const int RESET_PIN = 3;     // Reset output (Active high)
+const int CLK_IN_PIN = 4;    // Clock input (for single stepping)
+const int BUS_PINS[] = {6, 7, 8, 9, 10, 11, 12, 13}; // 8-bit bus
+const int REG_A_IN_PIN = 19; // Register A input (active low)
+const int REG_A_OUT_PIN = 20; // Register A output (active low)
+const int REG_B_IN_PIN = 21; // Register B input (active low)
+const int REG_B_OUT_PIN = 5; // Register B output (active low)
+
+const int ALU_SUB_PIN = 14;  // ALU Subtract output (active high)
+const int ALU_EO_PIN = 15;   // ALU /EO output (active low)
+const int ALU_FI_PIN = 16;   // ALU /FI output (active low)
+const int ALU_ZF_PIN = 17;   // ALU Zero Flag input
+const int ALU_CF_PIN = 18;   // ALU Carry Flag input
+
+const int PC_CE_PIN = 24;   // PC Count Enable
+const int PC_J_PIN = 52;   // PC Jump (Active low)
+const int PC_CO_PIN = 50;   // PC Count Out (Active Low)
+
+int programCounter = 0; // Initialize the program counter
+
+void setup() {
+  Serial.begin(9600);
+
+  // Set up control pins
+  pinMode(CLK_OUT_PIN, OUTPUT);
+  pinMode(RESET_PIN, OUTPUT);
+  pinMode(CLK_IN_PIN, INPUT_PULLUP); // Use internal pull-up resistor
+
+  // Set up bus pins
+  for (int i = 0; i < 8; i++) {
+    pinMode(BUS_PINS[i], OUTPUT); // Set bus pins as outputs initially
+  }
+
+  // Set up Register A and B pins
+  pinMode(REG_A_IN_PIN, OUTPUT);
+  pinMode(REG_A_OUT_PIN, OUTPUT);
+  pinMode(REG_B_IN_PIN, OUTPUT);
+  pinMode(REG_B_OUT_PIN, OUTPUT);
+
+  // Set up ALU and B Register pins
+  pinMode(ALU_SUB_PIN, OUTPUT);
+  pinMode(ALU_EO_PIN, OUTPUT);
+  pinMode(ALU_FI_PIN, OUTPUT);
+  pinMode(ALU_ZF_PIN, INPUT);
+  pinMode(ALU_CF_PIN, INPUT);
+
+  // Set up PC
+  pinMode(PC_CE_PIN, OUTPUT);
+  pinMode(PC_J_PIN, OUTPUT);
+  pinMode(PC_CO_PIN, OUTPUT);
+
+  clearRegisters();
+
+  // Set Register A and B pins to a defined state
+  digitalWrite(REG_A_IN_PIN, HIGH); // Disable input to Register A (active low)
+  digitalWrite(REG_A_OUT_PIN, HIGH); // Disable output from Register A (active low)
+  digitalWrite(REG_B_IN_PIN, HIGH); // Disable input to Register B (active low)
+  digitalWrite(REG_B_OUT_PIN, HIGH); // Disable output from Register B (active low)
+
+  //Set ALU to defined space
+  pinMode(ALU_SUB_PIN, HIGH);
+  pinMode(ALU_EO_PIN, HIGH);
+  pinMode(ALU_FI_PIN, HIGH);
+
+  //Set PC to defined space.
+  pinMode(PC_CE_PIN, LOW);
+  pinMode(PC_J_PIN, HIGH);
+  pinMode(PC_CO_PIN, HIGH);
+
+  // Print command list
+  printCommandList();
+}
+
+void loop() {
+  // Check for serial input
+  if (Serial.available() > 0) {
+    String command = Serial.readStringUntil('\n'); // Read the command until newline
+    processCommand(command); // Process the command
+  }
+}
+
+// Function to print the command list
+void printCommandList() {
+  Serial.println("Available commands:");
+  Serial.println("  A <value> - Write <value> to Register A");
+  Serial.println("  B <value> - Write <value> to Register B");
+  Serial.println("  C A - Clear Register A");
+  Serial.println("  C B - Clear Register B");
+  Serial.println("  R - Reset the system");
+  Serial.println("  M A - Move data from Register A to Register B");
+  Serial.println("  M B - Move data from Register B to Register A");
+  Serial.println("  ALU R - Read ALU output and flags");
+  Serial.println("  ALU ADD - Set ALU to addition mode");
+  Serial.println("  ALU SUB - Set ALU to subtraction mode");
+  Serial.println("  PC INC - Increment the Program Counter");
+  Serial.println("  PC J <value> - Load immediate value to the bus and jump");
+  Serial.println("  PC R - Output the Program Counter to the bus and read it.");
+}
+
+// Function to process the command
+void processCommand(String command) {
+  command.trim(); // Remove any leading/trailing whitespace
+  command.toUpperCase(); // Convert command to lowercase
+
+  if (command.startsWith("A ")) {
+    // Write to Register A
+    int value = command.substring(2).toInt(); // Get the value after 'A '
+    writeToRegisterA(value);
+  } else if (command.startsWith("B ")) {
+    // Write to Register B
+    int value = command.substring(2).toInt(); // Get the value after 'B '
+    writeToRegisterB(value);
+  } else if (command.equals("C A")) {
+    // Clear Register A
+    clearRegisterA();
+    Serial.println("Register A cleared.");
+  } else if (command.equals("C B")) {
+    // Clear Register B
+    clearRegisterB();
+    Serial.println("Register B cleared.");
+  } else if (command.equals("R")) {
+    // Hold the reset line
+    clearRegisters();
+    Serial.println("System reset.");
+  } else if (command.startsWith("PC INC")) {
+    // Increment the Program Counter
+    incrementProgramCounter();
+  } else if (command.startsWith("PC J ")) {
+    // Load immediate value to the bus and jump
+    int value = command.substring(5).toInt(); // Get the value after 'PC J '
+    loadImmediateToBus(value);
+  } else if (command.equals("PC R")) {
+    // Output the Program Counter to the bus and read it
+    outputProgramCounter();    
+  } else if (command.equals("ALU R")) {
+    // Read ALU output and flags
+    readALU();
+  } else if (command.equals("ALU ADD")) {
+    digitalWrite(ALU_SUB_PIN, LOW); // Set ALU to addition mode
+     Serial.println("ALU set to ADD mode.");
+  } else if (command.equals("ALU SUB")) {
+      digitalWrite(ALU_SUB_PIN, HIGH); // Set ALU to subtraction mode
+      Serial.println("ALU set to SUB mode.");
+  } else if (command.startsWith("M ")) {
+    // Move data between registers
+    if (command.equals("M A")) {
+      moveAToB();
+    } else if (command.equals("M B")) {
+      moveBToA();
+    } else {
+      Serial.println("Invalid move command. Use 'M A' or 'M B'.");
+    }
+  } else {
+    Serial.println("Invalid command. Use 'A <value>', 'B <value>', 'C A', 'C B', 'R', 'M A', or 'M B'.");
+  }
+}
+
+// Function to write a value to a register
+void writeToRegister(int value, int regInPin, int regOutPin) {
+  writeToBus(value); // Write the value to the bus
+  digitalWrite(regInPin, LOW); // Enable input to the register (active low)
+  delay(10);
+  pulseClock(); // Clock pulse to latch the value into the register
+  digitalWrite(regInPin, HIGH); // Disable input to the register (active low)
+
+  // Read back the value from the register
+  digitalWrite(regOutPin, LOW); // Enable output from the register (active low)
+  pulseClock(); // Clock pulse to read the value
+  int readValue = readFromBus(); // Read the value from the bus
+  digitalWrite(regOutPin, HIGH); // Disable output from the register (active low)
+
+  // Print the results
+  Serial.print("Value written to Register: ");
+  Serial.print(value);
+  Serial.print(", Read value: ");
+  Serial.println(readValue);
+}
+
+// Function to increment the Program Counter
+void incrementProgramCounter() {
+  digitalWrite(PC_CE_PIN, HIGH); // Enable counting (active low)
+  pulseClock(); // Clock pulse to increment the PC
+  digitalWrite(PC_CE_PIN, LOW); // Disable counting (active low)
+
+  Serial.println("Program Counter incremented.");
+}
+
+// Function to load an immediate value to the bus and jump
+void loadImmediateToBus(int value) {
+  writeToBus(value); // Write the immediate value to the bus
+  digitalWrite(PC_J_PIN, LOW); // Enable jump (active low)
+  pulseClock(); // Clock pulse to latch the value
+  digitalWrite(PC_J_PIN, HIGH); // Disable jump (active low)
+  Serial.print("Loaded immediate value: ");
+  Serial.println(value);
+}
+
+// Function to output the Program Counter to the bus and read it
+void outputProgramCounter() {
+  // Assuming you have a way to read the current value of the program counter
+  // For demonstration, we'll just output the current value of the program counter variable
+  writeToBus(programCounter); // Write the current PC value to the bus
+  digitalWrite(PC_CO_PIN, LOW); // Enable output (active low)
+  pulseClock(); // Clock pulse to read the value
+  int readValue = readFromBus(); // Read the value from the bus
+  digitalWrite(PC_CO_PIN, HIGH); // Disable output (active low)
+
+  Serial.print("Program Counter output: ");
+  Serial.println(readValue);
+}
+
+// Function to write a value to Register A
+void writeToRegisterA(int value) {
+  writeToRegister(value, REG_A_IN_PIN, REG_A_OUT_PIN);
+}
+
+// Function to write a value to Register B
+void writeToRegisterB(int value) {
+  writeToRegister(value, REG_B_IN_PIN, REG_B_OUT_PIN);
+}
+
+// Function to move data from Register A to Register B
+void moveAToB() {
+  setBusDirection(INPUT); // Set bus to INPUT mode
+  digitalWrite(REG_A_OUT_PIN, LOW); // Enable output from Register B (active low)
+  digitalWrite(REG_B_IN_PIN, LOW); // Enable input from Register A (active low) 
+  pulseClock(); // Clock pulse to read the value
+  delay(50); // Short pulse
+  digitalWrite(REG_B_IN_PIN, HIGH); // Disable input from Register A (active low) 
+  digitalWrite(REG_A_OUT_PIN, HIGH); // Disable output from Register B (active low)
+  // Write value to Register B
+  setBusDirection(OUTPUT); // Set bus to OUTPUT mode
+  Serial.println("Moved value from Register A to Register B: ");
+}
+
+// Function to move data from Register B to Register A
+void moveBToA() {
+  setBusDirection(INPUT); // Set bus to INPUT mode
+  digitalWrite(REG_B_OUT_PIN, LOW); // Enable output from Register B (active low)
+  digitalWrite(REG_A_IN_PIN, LOW); // Enable input from Register A (active low) 
+  pulseClock(); // Clock pulse to read the value
+  delay(50); // Short pulse
+  digitalWrite(REG_A_IN_PIN, HIGH); // Disable input from Register A (active low) 
+  digitalWrite(REG_B_OUT_PIN, HIGH); // Disable output from Register B (active low)
+  // Write value to Register A
+  setBusDirection(OUTPUT); // Set bus to OUTPUT mode
+  Serial.println("Moved value from Register B to Register A: ");
+}
+
+// Function to write a value to the bus
+void writeToBus(int value) {
+  for (int i = 0; i < 8; i++) {
+    digitalWrite(BUS_PINS[i], (value >> i) & 0x01);
+  }
+  delay(200); // Short pulse
+}
+
+// Function to read a value from the bus
+int readFromBus() {
+  int value = 0;
+  for (int i = 0; i < 8; i++) {
+    pinMode(BUS_PINS[i], INPUT); // Set bus pins as inputs for reading
+    value |= (digitalRead(BUS_PINS[i]) << i);
+  }
+  // Set bus pins back to outputs
+  for (int i = 0; i < 8; i++) {
+    pinMode(BUS_PINS[i], OUTPUT);
+  }
+  return value;
+}
+
+// Function to read ALU output and flags
+void readALU() {
+  // Enable ALU output
+  digitalWrite(ALU_EO_PIN, LOW); // Enable ALU output (active low)
+  pulseClock(); // Clock pulse to read the ALU output
+
+  // Read ALU output from the bus
+  int aluOutput = readFromBus(); // Read the value from the bus
+  digitalWrite(ALU_EO_PIN, HIGH); // Disable ALU output (active low)
+
+  // Read flags
+  bool zeroFlag = digitalRead(ALU_ZF_PIN); // Read Zero Flag
+  bool carryFlag = digitalRead(ALU_CF_PIN); // Read Carry Flag
+
+  // Print the results
+  Serial.print("ALU Output: ");
+  Serial.println(aluOutput);
+  Serial.print("Zero Flag: ");
+  Serial.println(zeroFlag ? "1 (active)" : "0 (inactive)");
+  Serial.print("Carry Flag: ");
+  Serial.println(carryFlag ? "1 (active)" : "0 (inactive)");
+}
+
+// Function to pulse the clock
+void pulseClock() {
+  digitalWrite(CLK_OUT_PIN, HIGH);
+  delay(50); // Short pulse
+  digitalWrite(CLK_OUT_PIN, LOW);
+}
+
+// Function to clear Register A
+void clearRegisterA() {
+  writeToBus(0); // Write 0 to the bus
+  digitalWrite(REG_A_IN_PIN, LOW); // Enable input to Register A (active low)
+  pulseClock(); // Pulse the clock to clear Register A
+  digitalWrite(REG_A_IN_PIN, HIGH); // Disable input to Register A (active low)
+}
+
+// Function to clear Register B
+void clearRegisterB() {
+  writeToBus(0); // Write 0 to the bus
+  digitalWrite(REG_B_IN_PIN, LOW); // Enable input to Register B (active low)
+  pulseClock(); // Pulse the clock to clear Register B
+  digitalWrite(REG_B_IN_PIN, HIGH); // Disable input to Register B (active low)
+}
+
+// Function to clear Registers 
+void clearRegisters() { 
+  digitalWrite(RESET_PIN, HIGH); // Enable input to Register A (active low) 
+  delay(10); 
+  digitalWrite(RESET_PIN, LOW); // Disable input to Register A (active low) 
+}
+
+// Function to set the bus direction
+void setBusDirection(bool output) {
+  for (int i = 0; i < 8; i++) {
+    pinMode(BUS_PINS[i], output ? OUTPUT : INPUT); // Set bus pins to OUTPUT or INPUT
+  }
+}
